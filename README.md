@@ -329,6 +329,7 @@ docker exec -it claude-review-runner claude --version
 |------|---------|
 | Draft PR | しない |
 | Ready + 自分/チームがレビュアー | **する** |
+| Ready + 自分が作成したPR | **する**（`GITHUB_REVIEWERS` のユーザーが author の場合） |
 | Ready + レビュー提出後に追加コミット | **する**（tracked で追跡継続） |
 | Ready + コメント/ラベル/CI のみ | しない |
 | 同じPRが既にレビュー実行中 | しない（flock で排他） |
