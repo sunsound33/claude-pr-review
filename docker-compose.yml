@@ -1,0 +1,68 @@
+services:
+  n8n:
+    build:
+      context: .
+      dockerfile: Dockerfile.n8n
+    container_name: claude-review-n8n
+    restart: unless-stopped
+    user: root
+    ports:
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - N8N_SECURE_COOKIE=false
+      # root で実行するためデータ保存先を明示（デフォルトは ~/. n8n → /root/.n8n になり永続化されない）
+      - N8N_USER_FOLDER=/home/node
+      - GENERIC_TIMEZONE=Asia/Tokyo
+      - TZ=Asia/Tokyo
+      # Code ノードで child_process を使うために必要
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process
+      # Code ノードから $env で環境変数を読むために必要
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # レビュー実行は長時間かかるためタイムアウトを延長（秒）
+      - EXECUTIONS_TIMEOUT=900
+      - EXECUTIONS_TIMEOUT_MAX=900
+      # Code ノードの実行タイムアウト（デフォルト300秒）
+      - N8N_RUNNERS_TASK_TIMEOUT=900
+      - GITHUB_REVIEWERS=${GITHUB_REVIEWERS:-}
+      - GITHUB_TEAMS=${GITHUB_TEAMS:-}
+      - GITHUB_REPOS=${GITHUB_REPOS:-}
+      - "SLACK_CHANNEL=${SLACK_CHANNEL:-#code-review}"
+      - POLL_INTERVAL_MINUTES=${POLL_INTERVAL_MINUTES:-1}
+    networks:
+      - review-net
+
+  claude-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude
+      # #19対策: Linux環境ではホストのUID/GIDに合わせてビルド
+      args:
+        - USER_ID=${USER_ID:-1000}
+        - GROUP_ID=${GROUP_ID:-1000}
+    container_name: claude-review-runner
+    restart: unless-stopped
+    volumes:
+      # .envに絶対パスで指定する（~や${HOME}は使えない）
+      - ${REPOS_BASE_PATH:?REPOS_BASE_PATH must be set}:/repos
+      - ${CLAUDE_CONFIG_PATH:?CLAUDE_CONFIG_PATH must be set}:/home/reviewer/.claude
+      - ./reviews:/home/reviewer/claude-reviews
+      - ./scripts:/scripts:ro
+      - ./prompts:/prompts:ro
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_TOKEN:?CLAUDE_TOKEN must be set}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:?GITHUB_TOKEN must be set}
+      - RELATED_REPOS=${RELATED_REPOS:-}
+      - FALLBACK_BRANCH=${FALLBACK_BRANCH:-develop}
+    command: tail -f /dev/null
+    networks:
+      - review-net
+
+volumes:
+  n8n_data:
+
+networks:
+  review-net:
+    driver: bridge

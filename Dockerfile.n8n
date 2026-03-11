@@ -1,0 +1,9 @@
+# n8nコンテナにDocker CLIをインストール
+# Execute Commandノードから docker exec を実行するために必要
+FROM n8nio/n8n:latest
+
+USER root
+# Hardened Alpine ベースのため apk/curl が無い → wget で Docker CLI を取得
+RUN wget -qO- "https://download.docker.com/linux/static/stable/$(uname -m)/docker-27.5.1.tgz" \
+      | tar xz --strip-components=1 -C /usr/local/bin docker/docker \
+    && docker --version
