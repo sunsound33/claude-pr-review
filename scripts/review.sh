@@ -38,7 +38,7 @@ fi
 
 REPO_PATH="/repos/${REPO_NAME}"
 LOG_DIR="/home/reviewer/claude-reviews"
-TIMEOUT_SECONDS=600
+TIMEOUT_SECONDS=900
 WORKTREE_BASE="/tmp/claude-review"
 LOCK_DIR="/tmp/claude-review-locks"
 FALLBACK="${FALLBACK_BRANCH:-develop}"

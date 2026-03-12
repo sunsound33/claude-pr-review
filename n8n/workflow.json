@@ -97,7 +97,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Claude Code でレビュー実行（非同期 - ワーカーブロック回避）\nconst { exec } = require('child_process');\nconst encoded = $input.first().json.encoded;\n\nreturn new Promise((resolve) => {\n  const child = exec(\n    `docker exec claude-review-runner bash /scripts/review.sh \"${encoded}\"`,\n    { timeout: 660000, maxBuffer: 10 * 1024 * 1024, encoding: 'utf-8' },\n    (error, stdout, stderr) => {\n      if (error) {\n        resolve([{ json: { stdout: stdout || error.message, exitCode: error.code || 1 } }]);\n      } else {\n        resolve([{ json: { stdout: stdout, exitCode: 0 } }]);\n      }\n    }\n  );\n});"
+        "jsCode": "// Claude Code でレビュー実行（非同期 - ワーカーブロック回避）\nconst { exec } = require('child_process');\nconst encoded = $input.first().json.encoded;\n\nreturn new Promise((resolve) => {\n  const child = exec(\n    `docker exec claude-review-runner bash /scripts/review.sh \"${encoded}\"`,\n    { timeout: 960000, maxBuffer: 10 * 1024 * 1024, encoding: 'utf-8' },\n    (error, stdout, stderr) => {\n      if (error) {\n        resolve([{ json: { stdout: stdout || error.message, exitCode: error.code || 1 } }]);\n      } else {\n        resolve([{ json: { stdout: stdout, exitCode: 0 } }]);\n      }\n    }\n  );\n});"
       },
       "name": "Review",
       "type": "n8n-nodes-base.code",

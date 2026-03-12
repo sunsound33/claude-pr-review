@@ -22,10 +22,10 @@ services:
       # Code ノードから $env で環境変数を読むために必要
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       # レビュー実行は長時間かかるためタイムアウトを延長（秒）
-      - EXECUTIONS_TIMEOUT=900
-      - EXECUTIONS_TIMEOUT_MAX=900
+      - EXECUTIONS_TIMEOUT=1200
+      - EXECUTIONS_TIMEOUT_MAX=1200
       # Code ノードの実行タイムアウト（デフォルト300秒）
-      - N8N_RUNNERS_TASK_TIMEOUT=900
+      - N8N_RUNNERS_TASK_TIMEOUT=1200
       - GITHUB_REVIEWERS=${GITHUB_REVIEWERS:-}
       - GITHUB_TEAMS=${GITHUB_TEAMS:-}
       - GITHUB_REPOS=${GITHUB_REPOS:-}
