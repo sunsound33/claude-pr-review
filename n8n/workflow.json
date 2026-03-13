@@ -147,7 +147,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// staticDataからスレッド情報を取得し、データを準備\nconst staticData = $getWorkflowStaticData('global');\nconst threads = staticData.threads || {};\nconst data = $input.first().json;\nconst threadTs = threads[data.pr._key];\nconst hasThread = !!(threadTs && typeof threadTs === 'string' && threadTs.includes('.'));\n\n// 再レビュー（スレッドなし）時のparentText修正\nlet parentText = data.parentText;\nif (data.isReReview && !hasThread) {\n  const mentionIds = ($env.SLACK_MENTION || '').split(',').map(s => s.trim()).filter(Boolean);\n  const mention = mentionIds.length > 0 ? mentionIds.map(id => '<@' + id + '>').join(' ') : '';\n  parentText = '🔄 *再レビュー* ' + mention + '\\n' + data.parentText;\n}\n\nreturn [{ json: { ...data, hasThread, threadTs: threadTs || '', parentText } }];"
+        "jsCode": "// staticDataからスレッド情報を取得し、データを準備\nconst staticData = $getWorkflowStaticData('global');\nconst threads = staticData.threads || {};\nconst data = $input.first().json;\nconst threadTs = threads[data.pr._key];\nconst hasThread = !!(threadTs && typeof threadTs === 'string' && threadTs.includes('.'));\n\n// 新規親メッセージ作成時のメンション・ラベル付与\nlet parentText = data.parentText;\nif (!hasThread) {\n  const mentionIds = ($env.SLACK_MENTION || '').split(',').map(s => s.trim()).filter(Boolean);\n  const mention = mentionIds.length > 0 ? mentionIds.map(id => '<@' + id + '>').join(' ') : '';\n  if (data.isReReview) {\n    parentText = '🔄 *再レビュー* ' + mention + '\\n' + data.parentText;\n  } else if (mention) {\n    parentText = data.parentText + '\\n' + mention;\n  }\n}\n\nreturn [{ json: { ...data, hasThread, threadTs: threadTs || '', parentText } }];"
       },
       "name": "CheckThread",
       "type": "n8n-nodes-base.code",
