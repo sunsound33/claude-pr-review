@@ -1,6 +1,7 @@
 # n8n × Claude Code ローカル自動PRレビュー
 
 GitHub の Pull Request を Claude Code が自動レビューし、結果を Slack にスレッド形式で投稿するシステム。
+再レビュー時は既存スレッドに追記し、メンションで通知する。
 
 ## アーキテクチャ
 
@@ -11,9 +12,9 @@ GitHub の Pull Request を Claude Code が自動レビューし、結果を Sla
 │    ├── GitHub API でPR一覧取得                     │
 │    ├── Draft スキップ                              │
 │    ├── レビュアー/チームフィルタ（tracked で追跡）   │
-│    ├── head.sha + TTL(2h) で重複防止               │
+│    ├── head.sha で重複防止（同一SHA永久スキップ）    │
 │    ├── base64 エンコードで安全に引数渡し            │
-│    ├── 失敗時 → Slack にエラー通知、次回再実行       │
+│    ├── 失敗時 → Slack にエラー通知（最大3回リトライ） │
 │    ├── 同時実行中 → スキップ                        │
 │    │                                              │
 │    ▼                                              │
@@ -29,7 +30,10 @@ GitHub の Pull Request を Claude Code が自動レビューし、結果を Sla
 │    └── ⚡ performance-reviewer（並列）             │
 │                                                   │
 │  n8n → Slack にスレッド形式で投稿                   │
-│    ├── SlackParent: 親メッセージ（スコア概要）      │
+│    ├── CheckThread: スレッド存在チェック             │
+│    ├── HasThread(IF): 既存スレッドの有無で分岐       │
+│    ├── 既存あり → ReReviewMessages → SlackThread    │
+│    ├── 新規 → SlackParent → ThreadMessages          │
 │    └── SlackThread: スレッド返信（詳細・issue別）   │
 └───────────────────────────────────────────────────┘
 ```
@@ -39,7 +43,9 @@ GitHub の Pull Request を Claude Code が自動レビューし、結果を Sla
 ```
 Schedule(1分間隔) → RepoList → GitHubAPI(PR取得) → Filter(重複・レビュアー判定)
 → PrepareInput → Review(docker exec) → ParseResult → SkipCheck
-→ SlackParent(親メッセージ) → ThreadMessages → SlackThread(スレッド返信)
+→ CheckThread(スレッド判定) → HasThread(IF分岐)
+    ├─ true(既存スレッド有) → ReReviewMessages → SlackThread(既存スレッドに再レビュー追記)
+    └─ false(新規) → SlackParent(親メッセージ) → ThreadMessages → SlackThread(スレッド返信)
 ```
 
 ---
@@ -90,6 +96,12 @@ vim .env
 #   調べ方: Slack → 自分のプロフィール →「⋮」→「メンバーIDをコピー」
 #   例: "U05ABCDE12F"
 SLACK_CHANNEL="U01ABCDEF"
+
+# 再レビュー時のメンション先（Slack User ID、カンマ区切りで複数可）
+#   調べ方: Slack → プロフィール →「⋮」→「メンバーIDをコピー」
+#   例: SLACK_MENTION=U05ABCDE12F,U06XYZGH34J
+#   未設定の場合、再レビュー時にメンションなしで投稿される
+SLACK_MENTION=
 
 # ============================================
 # GitHub 設定
@@ -262,10 +274,10 @@ docker exec -it claude-review-runner claude --version
 | Operation | Send | Fixed |
 | Send Message To | Channel | Fixed |
 | Channel | By ID → `{{ $json.slackChannel }}` | By ID を選択し、右の入力欄を **Expression** にする |
-| Message Type | Simple Text Message | **Fixed** ⚠️ |
+| Message Type | Simple Text Message | **Fixed** |
 | Message Text | `{{ $json.parentText }}` | **Expression** |
 
-> **⚠️ 重要**: **Message Type は必ず Fixed** で「Simple Text Message」を選択すること。Expression にすると `invalid_arguments` エラーになる。
+> **重要**: **Message Type は必ず Fixed** で「Simple Text Message」を選択すること。Expression にすると `invalid_arguments` エラーになる。
 
 ### 6-5. SlackThread ノードの設定
 
@@ -279,21 +291,38 @@ docker exec -it claude-review-runner claude --version
 | Operation | Send | Fixed |
 | Send Message To | Channel | Fixed |
 | Channel | By ID → `{{ $json.channel }}` | By ID を選択し、右の入力欄を **Expression** にする |
-| Message Type | Simple Text Message | **Fixed** ⚠️ |
+| Message Type | Simple Text Message | **Fixed** |
 | Message Text | `{{ $json.text }}` | **Expression** |
 | **Reply to a Message** | **ON** | Options の「Add option」から追加してトグルを ON にする |
 | Thread Timestamp | `{{ $json.ts }}` | **Expression** |
 | Also Send to Channel | **OFF** | そのまま（スレッド内にだけ返信する） |
 
-> **⚠️ 重要**: **「Reply to a Message」** は Options セクションの「Add option」から追加する。ON にすると「Thread Timestamp」フィールドが表示される。これにより SlackParent の親メッセージにスレッド返信される。
+> **重要**: **「Reply to a Message」** は Options セクションの「Add option」から追加する。ON にすると「Thread Timestamp」フィールドが表示される。これにより SlackParent の親メッセージにスレッド返信される。
 
-### 6-6. SlackThread の「Reply to a Message」設定
+### 6-6. HasThread ノード（IF）の設定
 
-1. SlackThread ノードの Options セクションで **「Add option」** をクリック
-2. **「Reply to a Message」** を選択して追加
-3. トグルを **ON** にする
-4. 表示された **「Thread Timestamp」** に Expression で `{{ $json.ts }}` を設定
-5. **「Also Send to Channel」** トグルも表示されるが、**OFF のまま**でよい（ON にするとスレッド返信がチャンネルにも表示される）
+ワークフローをインポートすると HasThread ノードが自動作成される。以下の設定になっていることを確認する。
+
+1. **「HasThread」** ノードをダブルクリック
+2. **Parameters タブ** の Conditions セクションを確認:
+
+   | 項目 | 設定値 | 設定方法 |
+   | ---- | ------ | -------- |
+   | **1段目（Value 1）** | `{{ $json.hasThread }}` | **Expression** — 左端の **`fx`** ボタンをクリックして Expression モードに切り替えてから `{{ $json.hasThread }}` と入力 |
+   | **2段目（演算子）** | `is equal to` | ドロップダウンから選択（デフォルト） |
+   | **3段目（Value 2）** | `true` | **Fixed**（デフォルト）— `fx` は押さない。ドロップダウンに `true` / `false` が表示されるので **`true`** を選択 |
+
+   > **Expression と Fixed の違い**:
+   > - **Expression**（`fx` ON）: `{{ }}` 構文で動的な値を参照する。1段目はノードの出力値を参照するので Expression
+   > - **Fixed**（`fx` OFF）: 固定値。3段目は比較対象の定数なので Fixed。ドロップダウンから選ぶと Boolean 型になる
+   >
+   > **注意**: 3段目を Expression にしたり手入力で `true` と打つと文字列 `"true"` 扱いになり、Boolean の `true` と一致しないため正しく動作しない
+
+3. **接続を確認**（ノードの右側から2本の線が出ている）:
+   - **上の出力（true = main[0]）** → **ReReviewMessages**（Code ノード）→ SlackThread
+   - **下の出力（false = main[1]）** → **SlackParent**（Slack ノード）→ ThreadMessages → SlackThread
+
+   > IF ノードは常に2つの出力を持つ。上が true（条件一致）、下が false（条件不一致）。
 
 ### 6-7. ワークフローを有効化
 
@@ -320,6 +349,7 @@ docker exec -it claude-review-runner claude --version
 | GitHubAPI | PR の一覧が JSON で返っているか |
 | Filter | レビュー対象の PR が抽出されているか（レビュアーがアサインされた PR のみ通過） |
 | Review | Claude Code のレビュー結果が返っているか（**数分かかる**） |
+| CheckThread → HasThread | 既存スレッドの有無で正しく分岐しているか（true → ReReviewMessages, false → SlackParent） |
 | SlackParent | 親メッセージが Slack に投稿されているか |
 | SlackThread | 親メッセージのスレッドに詳細が投稿されているか |
 
@@ -333,39 +363,89 @@ docker exec -it claude-review-runner claude --version
 | Ready + レビュー提出後に追加コミット | **する**（tracked で追跡継続） |
 | Ready + コメント/ラベル/CI のみ | しない |
 | 同じPRが既にレビュー実行中 | しない（flock で排他） |
-| レビュー済み（同じ SHA、2時間以内） | しない（TTL で自動クリア） |
-| レビュー失敗/タイムアウト | Slack にエラー通知、次回**再実行** |
+| レビュー済み（同じ SHA） | しない（新コミットでSHA変更時のみ再レビュー） |
+| Approve 済み + チーム追加 | しない（同一SHAのため） |
+| レビュー失敗/タイムアウト | Slack にエラー通知、**最大3回リトライ**（新コミットでリセット） |
 
 ---
 
 ## Slack での表示
 
-### 正常時（スレッド形式）
+### 初回レビュー（スレッド形式）
 
 ```
 #code-review
-┌───────────────────────────────────────┐
-│ 🔍 PR #42 ユーザー検索APIの追加 📊 C  🔴2 🟡1 │
-└───────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│ 🔍 PR #42 ユーザー検索APIの追加           │
+│ 📊 Score: C  🔴2 🟡1                     │
+└──────────────────────────────────────────┘
   │ スレッド
   ├─ 🔗 https://github.com/org/repo/pull/42
-  │  👤 yamada-taro → develop
-  │  📝 SQLインジェクションと認証漏れが見つかった
-  ├─ 🔴 *セキュリティ*  `src/api/users.ts:45` ...
-  ├─ 🟡 *パフォーマンス*  `src/api/users.ts:52-58` ...
-  └─ ✅ 良い点 ...
+  │  👤 yamada-taro  `feature/user-search` → `develop`
+  │  📝 *サマリー*
+  │  SQLインジェクションと認証漏れが見つかった
+  ├─ 🔴 *Critical — セキュリティ*
+  │  📄 `src/api/users.ts:45`
+  │  ...
+  │  💡 `パラメータ化クエリを使用する`
+  ├─ 🟡 *Warning — パフォーマンス*
+  │  📄 `src/api/users.ts:52-58`
+  │  ...
+  ├─ ✅ *良い点*
+  │  • ...
+  └─ 💻 *手動確認コマンド*
+     ```cd ~/Develop/repo && git checkout feature/user-search && claude```
 ```
 
-### 失敗時
+### 再レビュー（既存スレッドに追記）
 
 ```
-┌───────────────────────────────────────┐
-│ ❌ PR #42 ユーザー検索APIの追加  レビュー失敗 │
-└───────────────────────────────────────┘
+  │ スレッド（既存の親メッセージの下に追記）
+  ├─ ... (初回レビューの内容)
+  ├─ 🔄 *再レビュー* @yamada-taro
+  │  🔍 PR #42 ユーザー検索APIの追加
+  │  📊 Score: B  🟡1
+  ├─ 🔗 https://github.com/org/repo/pull/42
+  │  ...
+  └─ 💻 *手動確認コマンド*
+     ```cd ~/Develop/repo && git checkout feature/user-search && claude```
+```
+
+### 再レビュー（スレッド消失時 → 新規スレッド作成）
+
+```
+┌──────────────────────────────────────────┐
+│ 🔄 *再レビュー* @yamada-taro              │
+│ 🔍 PR #42 ユーザー検索APIの追加           │
+│ 📊 Score: B  🟡1                         │
+└──────────────────────────────────────────┘
+  │ スレッド
+  ├─ 🔗 ...
+  └─ 💻 *手動確認コマンド*
+     ...
+```
+
+### 失敗時（最大3回リトライ）
+
+```
+┌─────────────────────────────────────────────────────┐
+│ ❌ PR #42 ユーザー検索APIの追加  レビュー失敗 （リトライ 1/3） │
+└─────────────────────────────────────────────────────┘
   │ スレッド
   └─ 🔗 https://github.com/...
      エラー: タイムアウトまたは実行失敗
-     次のポーリングで再実行されます。
+
+（2回目リトライ → 既存スレッドに追記）
+  ├─ 🔄 *再レビュー* @yamada-taro
+  │  ❌ PR #42 ...  レビュー失敗 （リトライ 2/3）
+  └─ ...
+
+（3回目リトライ → 以降スキップ）
+  ├─ 🔄 *再レビュー* @yamada-taro
+  │  ❌ PR #42 ...  レビュー失敗 （最終リトライ — 以降スキップ）
+  └─ ...
+
+※ 新コミットが push されるとリトライカウントがリセットされる
 ```
 
 ---
@@ -448,11 +528,13 @@ git remote set-url origin https://github.com/org/repo.git
 | Slack に投稿されない | Credential の紐付けと Bot Token を確認。チャンネル投稿の場合はボットを `/invite` しているか確認 |
 | Slack に「undefined」が投稿される | n8n がキャッシュした古いコードを実行している。ワークフローを削除して再インポートする（下記参照） |
 | SlackThread で `invalid_arguments` | **Message Type** が Expression になっていないか確認（Fixed で「Simple Text Message」にする）。**Reply to a Message** が ON か確認。**Thread Timestamp** に `{{ $json.ts }}` が設定されているか確認 |
+| 再レビューがスレッドに追記されない | HasThread (IF ノード) の条件が `{{ $json.hasThread }}` equals `true` (Boolean) になっているか確認。接続: true → ReReviewMessages, false → SlackParent |
 
 ### レビュー済み PR が再レビューされない / 再レビューしたい
 
-レビュー済みPRは **同じ SHA に対して 2 時間の TTL** で自動的に再レビュー可能になる。
-新しいコミットが push されれば SHA が変わるので即座に再レビューされる。
+レビュー済みPRは**同じ SHA の間はスキップ**される（永久）。
+新しいコミットが push されれば SHA が変わるので再レビューされる。
+Approve 済み PR にチームが追加されても、SHA が同じならスキップされる。
 
 **即座に再レビューしたい場合（staticData のリセット）:**
 
@@ -462,6 +544,7 @@ git remote set-url origin https://github.com/org/repo.git
 4. Credential を再設定して有効化する
 
 > staticData はワークフローに紐づくため、削除→再インポートでリセットされる。
+> **注意**: リセットするとスレッド追記用の情報も消えるため、次回は新規スレッドが作成される。
 
 ### ワークフロー再インポート手順（コード修正時にも必要）
 
@@ -472,7 +555,8 @@ git remote set-url origin https://github.com/org/repo.git
 3. **「Import from File」** で `n8n/workflow.json` を再インポート
 4. **Credential を再設定する**（GitHubAPI, SlackParent, SlackThread）
 5. **Slack ノードの設定を確認する**（特に Message Type, Reply to a Message, Thread Timestamp）
-6. 保存して有効化する
+6. **HasThread (IF ノード) の設定を確認する**（条件: `{{ $json.hasThread }}` equals true）
+7. 保存して有効化する
 
 > **注意**: Credential と Slack ノードの手動設定は再インポートのたびに必要。workflow.json にはプレースホルダー ID が入っているため。
 

@@ -30,6 +30,7 @@ services:
       - GITHUB_TEAMS=${GITHUB_TEAMS:-}
       - GITHUB_REPOS=${GITHUB_REPOS:-}
       - "SLACK_CHANNEL=${SLACK_CHANNEL:-#code-review}"
+      - SLACK_MENTION=${SLACK_MENTION:-}
       - POLL_INTERVAL_MINUTES=${POLL_INTERVAL_MINUTES:-1}
     networks:
       - review-net
