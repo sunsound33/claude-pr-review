@@ -18,7 +18,7 @@ services:
       - GENERIC_TIMEZONE=Asia/Tokyo
       - TZ=Asia/Tokyo
       # Code ノードで child_process を使うために必要
-      - NODE_FUNCTION_ALLOW_BUILTIN=child_process
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,fs
       # Code ノードから $env で環境変数を読むために必要
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       # レビュー実行は長時間かかるためタイムアウトを延長（秒）
