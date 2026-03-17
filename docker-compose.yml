@@ -18,7 +18,7 @@ services:
       - GENERIC_TIMEZONE=Asia/Tokyo
       - TZ=Asia/Tokyo
       # Code ノードで child_process を使うために必要
-      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,fs
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process
       # Code ノードから $env で環境変数を読むために必要
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       # レビュー実行は長時間かかるためタイムアウトを延長（秒）
@@ -31,6 +31,7 @@ services:
       - GITHUB_REPOS=${GITHUB_REPOS:-}
       - "SLACK_CHANNEL=${SLACK_CHANNEL:-#code-review}"
       - SLACK_MENTION=${SLACK_MENTION:-}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
       - POLL_INTERVAL_MINUTES=${POLL_INTERVAL_MINUTES:-1}
     networks:
       - review-net
