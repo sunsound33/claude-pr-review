@@ -345,15 +345,27 @@ cat >> "$PROMPT_FILE" << 'INSTREOF'
 INSTREOF
 
 # --- Claude Code 実行（プロンプトはファイルから読み込み） ---
+echo "[$(date)] Claude Code 実行開始 PR#${PR_NUMBER}" >> "$ERROR_LOG"
+set +e
 REVIEW_RESULT=$(timeout "$TIMEOUT_SECONDS" claude -p "$(cat "$PROMPT_FILE")" \
   $PROMPT_FLAG \
   --agents "$AGENTS" \
   --output-format json \
   --allowedTools "Read,Grep,Glob,Bash" \
-  2>>"$ERROR_LOG") || {
-    echo '{"error": "タイムアウトまたは実行失敗", "failed": true}'
-    exit 1
-  }
+  2>>"$ERROR_LOG")
+CLAUDE_EXIT=$?
+set -e
+echo "[$(date)] Claude Code 終了 exit_code=${CLAUDE_EXIT}" >> "$ERROR_LOG"
+
+if [ "$CLAUDE_EXIT" -ne 0 ]; then
+  if [ "$CLAUDE_EXIT" -eq 124 ]; then
+    ERROR_MSG="タイムアウト（${TIMEOUT_SECONDS}秒超過）"
+  else
+    ERROR_MSG="Claude CLI実行失敗（exit_code=${CLAUDE_EXIT}）"
+  fi
+  echo "{\"error\": \"${ERROR_MSG}\", \"failed\": true, \"exit_code\": ${CLAUDE_EXIT}}"
+  exit 1
+fi
 
 # --- ログ保存（Claude の生出力） ---
 echo "$REVIEW_RESULT" > "$LOG_FILE"
