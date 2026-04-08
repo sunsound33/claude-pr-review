@@ -358,6 +358,8 @@ set -e
 echo "[$(date)] Claude Code 終了 exit_code=${CLAUDE_EXIT}" >> "$ERROR_LOG"
 
 if [ "$CLAUDE_EXIT" -ne 0 ]; then
+  # CLI stdout にエラー詳細が含まれる場合があるのでログに記録
+  echo "[$(date)] Claude CLI stdout (先頭500文字): ${REVIEW_RESULT:0:500}" >> "$ERROR_LOG"
   if [ "$CLAUDE_EXIT" -eq 124 ]; then
     ERROR_MSG="タイムアウト（${TIMEOUT_SECONDS}秒超過）"
   else
